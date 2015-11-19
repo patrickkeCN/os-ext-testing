@@ -39,10 +39,6 @@ sudo git  --work-tree=/root/system-config/ --git-dir=/root/system-config/.git pu
 # Puppet module splits requires re-installing modules from the new location
 sudo /bin/bash /root/system-config/install_modules.sh
 
-echo "Update project-config"
-sudo git  --work-tree=/root/project-config/ --git-dir=/root/project-config/.git remote update
-sudo git  --work-tree=/root/project-config/ --git-dir=/root/project-config/.git pull
-
 # Clone or pull the the os-ext-testing repository
 if [[ ! -d $OSEXT_PATH ]]; then
     echo "Cloning os-ext-testing repo..."
@@ -55,11 +51,15 @@ if [[ "$PULL_LATEST_OSEXT_REPO" == "1" ]]; then
 fi
 
 if [[ ! -e $DATA_PATH ]]; then
-    echo "Enter the URI for the location of your config data repository. Example: https://github.com/rasselin/os-ext-testing-data"
-    read data_repo_uri
-    if [[ "$data_repo_uri" == "" ]]; then
-        echo "Data repository is required to proceed. Exiting."
-        exit 1
+    if [[ -z $PROJECT_CONFIG ]]; then
+        echo "Enter the URI for the location of your project-config data repository. Example: https://github.com/rasselin/os-ext-testing-data"
+        read data_repo_uri
+        if [[ "$data_repo_uri" == "" ]]; then
+            echo "Data repository is required to proceed. Exiting."
+            exit 1
+        fi
+    else
+        data_repo_uri=$PROJECT_CONFIG
     fi
     git clone $data_repo_uri $DATA_PATH
 fi
@@ -70,6 +70,7 @@ if [[ "$PULL_LATEST_DATA_REPO" == "1" ]]; then
 fi
 
 # Pulling in variables from data repository
+echo "Pulling in custom vars from $DATA_PATH/vars.sh"
 . $DATA_PATH/vars.sh
 
 # Validate that the upstream gerrit user and key are present in the data
@@ -101,50 +102,10 @@ else
     JENKINS_SSH_PUBLIC_KEY_NO_WHITESPACE=`sudo cat $DATA_PATH/$JENKINS_SSH_KEY_PATH.pub | cut -d' ' -f 2`
 fi
 
-# Copy over the nodepool template
-if [[ ! -e "$DATA_PATH/etc/nodepool/nodepool.yaml.erb" ]]; then
-    echo "Expected to find nodepool template at $DATA_PATH/etc/nodepool/nodepool.yaml.erb, but wasn't found. Please create this using the sample provided. Exiting."
-    exit 1
-else
-    cp -f $DATA_PATH/etc/nodepool/nodepool.yaml.erb $OSEXT_PATH/puppet/modules/os_ext_testing/templates/nodepool
-fi
-
 PUBLISH_HOST=${PUBLISH_HOST:-localhost}
 
-# Create a self-signed SSL certificate for use in Apache
-APACHE_SSL_ROOT_DIR=$THIS_DIR/tmp/apache/ssl
-if [[ ! -e $APACHE_SSL_ROOT_DIR/new.ssl.csr ]]; then
-    echo "Creating self-signed SSL certificate for Apache"
-    mkdir -p $APACHE_SSL_ROOT_DIR
-    cd $APACHE_SSL_ROOT_DIR
-    echo '
-[ req ]
-default_bits            = 2048
-default_keyfile         = new.key.pem
-default_md              = default
-prompt                  = no
-distinguished_name      = distinguished_name
-
-[ distinguished_name ]
-countryName             = US
-stateOrProvinceName     = CA
-localityName            = Sunnyvale
-organizationName        = OpenStack
-organizationalUnitName  = OpenStack
-commonName              = localhost
-emailAddress            = openstack@openstack.org
-' > ssl_req.conf
-    # Create the certificate signing request
-    openssl req -new -config ssl_req.conf -nodes > new.ssl.csr
-    # Generate the certificate from the CSR
-    openssl rsa -in new.key.pem -out new.cert.key
-    openssl x509 -in new.ssl.csr -out new.cert.cert -req -signkey new.cert.key -days 3650
-    cd $THIS_DIR
-fi
-APACHE_SSL_CERT_FILE=`cat $APACHE_SSL_ROOT_DIR/new.cert.cert`
-APACHE_SSL_KEY_FILE=`cat $APACHE_SSL_ROOT_DIR/new.cert.key`
-
 if [[ -z $UPSTREAM_GERRIT_SERVER ]]; then
+    echo "No upstream gerrit server defined. Defaulting to review.openstack.org."
     UPSTREAM_GERRIT_SERVER="review.openstack.org"
 fi
 
@@ -154,46 +115,57 @@ upstream_gerrit_ssh_private_key => '$UPSTREAM_GERRIT_SSH_PRIVATE_KEY_CONTENTS',
 upstream_gerrit_ssh_host_key => '$UPSTREAM_GERRIT_SSH_HOST_KEY',"
 
 if [[ -n $UPSTREAM_GERRIT_BASEURL ]]; then
-    gerrit_args="$gerrit_args upstream_gerrit_baseurl => '$UPSTREAM_GERRIT_BASEURL', "
+    gerrit_args+="upstream_gerrit_baseurl => '$UPSTREAM_GERRIT_BASEURL', "
 fi
-
-apache_args="ssl_cert_file_contents => '$APACHE_SSL_CERT_FILE',
-             ssl_key_file_contents => '$APACHE_SSL_KEY_FILE', "
 
 zuul_args="git_email => '$GIT_EMAIL',
 git_name => '$GIT_NAME',
 publish_host => '$PUBLISH_HOST',
 data_repo_dir => '$DATA_PATH',"
 if [[ -n $URL_PATTERN ]]; then
-    zuul_args="$zuul_args url_pattern => '$URL_PATTERN', "
+    zuul_args+="url_pattern => '$URL_PATTERN', "
 fi
 if [[ -n $SMTP_HOST ]]; then
-    zuul_args="$zuul_args smtp_host => '$SMTP_HOST', "
+    zuul_args+="smtp_host => '$SMTP_HOST', "
 fi
 
-nodepool_args="mysql_root_password => '$MYSQL_ROOT_PASSWORD',
-               mysql_password => '$MYSQL_PASSWORD',
-               provider_username => '$PROVIDER_USERNAME',
-               provider_password => '$PROVIDER_PASSWORD',
-               provider_image_name => '$PROVIDER_IMAGE_NAME',"
+if [[ -n $PROJECT_CONFIG ]]; then
+    zuul_args+="project_config_repo => '$PROJECT_CONFIG', "
+else
+    zuul_args+="project_config_repo => '$OSEXT_REPO', "
+    echo "This repo now requires the use of project-config. Using $OSEXT_REPO."
+    echo "See https://github.com/rasselin/os-ext-testing-data#migrate-to-project-config for the instructions to migrate."
+fi
+if [[ -n $ZUUL_REPO ]]; then
+    zuul_args+="zuul_git_source_repo => '$ZUUL_REPO', "
+fi
+if [[ -n $ZUUL_REVISION ]]; then
+    zuul_args+="zuul_revision => '$ZUUL_REVISION', "
+fi
 
-if [[ -n $PROVIDER_IMAGE_SETUP_SCRIPT_NAME ]]; then
-    nodepool_args="$nodepool_args provider_image_setup_script_name => '$PROVIDER_IMAGE_SETUP_SCRIPT_NAME', "
+
+nodepool_args="mysql_root_password => '$MYSQL_ROOT_PASSWORD',
+               mysql_password => '$MYSQL_PASSWORD',"
+
+if [[ -n $NODEPOOL_REPO ]]; then
+    nodepool_args+="nodepool_git_source_repo => '$NODEPOOL_REPO', "
+fi
+if [[ -n $NODEPOOL_REVISION ]]; then
+    nodepool_args+="nodepool_revision => '$NODEPOOL_REVISION', "
+fi
+
+if [[ -z $JENKINS_API_PASSWORD ]]; then
+    JENKINS_API_PASSWORD=""
 fi
 
 jenkins_args="jenkins_ssh_public_key => '$JENKINS_SSH_PUBLIC_KEY_CONTENTS',
               jenkins_ssh_private_key => '$JENKINS_SSH_PRIVATE_KEY_CONTENTS',
               jenkins_api_user => '$JENKINS_API_USER',
+              jenkins_api_password => '$JENKINS_API_PASSWORD',
               jenkins_api_key => '$JENKINS_API_KEY',
               jenkins_credentials_id => '$JENKINS_CREDENTIALS_ID',
               jenkins_ssh_public_key_no_whitespace => '$JENKINS_SSH_PUBLIC_KEY_NO_WHITESPACE',"
 
-proxy_args="http_proxy => '$HTTP_PROXY',
-            https_proxy => '$HTTPS_PROXY',
-            no_proxy => '$NO_PROXY',"
-
-CLASS_ARGS="$gerrit_args $apache_args $zuul_args $nodepool_args $jenkins_args $proxy_args"
+CLASS_ARGS="$gerrit_args $zuul_args $nodepool_args $jenkins_args"
 sudo puppet apply --verbose $PUPPET_MODULE_PATH -e "class {'os_ext_testing::master': $CLASS_ARGS }"
 
-#Not sure why nodepool private key is not getting set in the puppet scripts
-sudo cp  $DATA_PATH/$JENKINS_SSH_KEY_PATH /home/nodepool/.ssh/id_rsa

@@ -1,3 +1,24 @@
+# DEPRECATION NOTICE
+
+This repo is now deprecated and will no longer be actively maintained.
+Why? Because there is finally a community supported edition that is
+very similar! \o/ You can read the new and improved instructions here:
+[https://github.com/openstack-infra/puppet-openstackci/blob/master/contrib/README.md](https://github.com/openstack-infra/puppet-openstackci/blob/master/contrib/README.md)
+
+If you've used this solution, migrating to the new solution should
+be relatively straight-forward. A lot of the 'magic' in the script
+has been made manual so that it is more explicit. You will also be
+using a better approach to maintaining a masterless puppet environment.
+In general, many of the custom
+values from the `vars.sh` are now stored in a hiera yaml file.
+In addition, all the configuration files stored in os-ext-testing-data
+repo are now available in
+[https://github.com/openstack-infra/project-config-example](https://github.com/openstack-infra/project-config-example)
+
+Future bug fixes, pull requests, etc. should be done on the
+above mentioned repositories for the benefit of the larger
+Openstack community and even some outside of OpenStack.
+
 # OpenStack External Test Platform
 
 !! THIS REPOSITORY IS VERY MUCH A WORK IN PROGRESS !!
@@ -10,11 +31,87 @@ a real-world external testing platform that links with the upstream
 OpenStack CI platform.
 
 It installs Jenkins, Jenkins Job Builder (JJB), the Gerrit
-Jenkins plugin, Nodepool, HTTP Proxy settings, and a set of scripts that make
+Jenkins plugin, Nodepool, and a set of scripts that make
 running a variety of OpenStack integration tests easy.
 
-Currently only Puppet modules are complete and tested. 
+Currently only Puppet modules are complete and tested.
 
+Background reading:
+[third_party](http://ci.openstack.org/third_party.html)
+
+The links below contain some out of date information:
+
+[understanding-the-openstack-ci-system](http://www.joinfu.com/2014/01/understanding-the-openstack-ci-system/)
+
+[setting-up-an-external-openstack-testing-system/](http://www.joinfu.com/2014/02/setting-up-an-external-openstack-testing-system/)
+
+[setting-up-an-openstack-external-testing-system-part-2](http://www.joinfu.com/2014/02/setting-up-an-openstack-external-testing-system-part-2/)
+
+
+## NEW 7/1/2015: This repo is being migrated to use project-config and puppet-openstackci
+This 3rd party ci repo is in the process of being migrated to use the
+[common-ci approach] (http://specs.openstack.org/openstack-infra/infra-specs/specs/openstackci.html)
+
+As part of that, there will be a migration from the os-ext-testing-data config
+repo to use a repo following the structure of [project-config] (https://github.com/openstack-infra/project-config/).
+
+Fortunately, that task is simple:
+
+1. Create a new repo called e.g. project-config-ci-name
+
+2. mkdir zuul
+
+3. cp ~/os-ext-testing-data/etc/zuul/layout.yaml ~/project-config-ci-name/zuul/
+
+4. cp ~/os-ext-testing/puppet/modules/os_ext_testing/files/zuul/openstack_functions.py ~/project-config-ci-name/zuul/
+
+5. update os-ext-testing-data/vars.sh to include export PROJECT_CONFIG=http://your_git_url/project-config-ci-name.git
+
+6. Push the changes. They'll be checked out in /etc/project-config
+
+NEW 7/17/2015 - Now using common-Jenkins Job Builder
+
+7. cp -R ~/os-ext-testing-data/etc/jenkins_jobs/config/* ~/project-config-ci-name/jenkins/jobs
+
+8. Push the changes. They'll be checked out in /etc/project-config
+
+NEW 8/24/2015 - Migrate nodepool configuration files to project-config
+
+There are a few big changes here. First, previously, the nodepool.yaml file was a template where some portions where
+populated by puppet. After migrating, the nodepool.yaml will be a static file containing all usernames and credentials.
+
+Second, previously the nodepool elements and scripts used to build nodepool images were copied from http://git.openstack.org/cgit/openstack-infra/project-config/tree/nodepool.
+The puppet scripts allowed you to override and add additional scripts/elements in your os-ext-testing-data repository. This is no
+longer supported. Instead, you manually fork the scripts and elements and maintain them separately.
+
+
+9. cd ~/project-config-ci-name/
+
+10. mkdir nodepool
+
+11. If you already have a nodepool.yaml file create previously, copy it from /etc/nodepool to ~/project-config-ci-name/nodepool
+otherwise, create a new one taking care to ensure all values are fully resolved. [Nodepool Configuration Manual]
+(http://docs.openstack.org/infra/nodepool/configuration.html)
+
+12. If you already have scripts/elemements in /etc/nodepool, copy them over to  ~/project-config-ci-name/nodepool/elements and
+ ~/project-config-ci-name/nodepool/scripts.
+Otherwise, start with the scripts/elements provided [by upstream's project config] (http://git.openstack.org/cgit/openstack-infra/project-config/tree/nodepool
+) and adjust to make them work in your environment.
+
+13. Remove any remaining values in your previous os-ext-testing-data/vars.sh such as PROVIDER_.*
+
+
+## Support
+
+If you need help, you can:
+
+1. Submit a question/issue via github
+
+2. Ask in the [third party ci meetings](https://wiki.openstack.org/wiki/Meetings/ThirdParty#Weekly_Third_Party_meetings)
+
+3. Ask in the [mailing list](http://lists.openstack.org/cgi-bin/mailman/listinfo/openstack-dev). Use [third-party] tag in the subject.
+
+4. Ask on [IRC freenode](https://wiki.openstack.org/wiki/IRC) in channel #openstack-infra
 
 ## Pre-requisites
 
@@ -41,11 +138,14 @@ CI platform. You can read the instructions for doing
 We will be installing a Jenkins master server and infrastructure on one
 host or virtual machine and one or more Jenkins slave servers on hosts or VMs.
 
-On each of these target nodes, you will want the base image to have the 
+On each of these target nodes, you will want the base image to have the
 `wget`, `openssl`, `ssl-cert` and `ca-certificates` packages installed before
 running anything in this repository.
 
-### Set Up Your Data Repository 
+### Set Up Your Data Repository
+
+NOTE: This section is a out-dated because of the migration towards the common-ci solution & project-config. See
+those details at the top of this README.
 
 You will want to create a Git repository containing configuration data files -- such as the
 Gerrit username and private SSH key file for your testing account -- that are used
@@ -91,7 +191,7 @@ data repository:
    key pair into some subdirectory of your data repository, then change the value of the `$JENKINS_SSH_KEY_PATH`
    variable in `vars.sh` to an appropriate value.
 
-7. Copy etc/nodepool/nodepool.yaml.erb.sample to etc/nodepool/nodepool.yaml.erb. Adjust as needed according to docs: http://ci.openstack.org/nodepool/configuration.html.  
+7. Copy etc/nodepool/nodepool.yaml.erb.sample to etc/nodepool/nodepool.yaml.erb. Adjust as needed according to docs: http://ci.openstack.org/nodepool/configuration.html.
 8. Update etc/zuul/layout.yaml according to docs: http://ci.openstack.org/zuul/zuul.html#layout-yaml
 
 ## Usage
@@ -162,84 +262,45 @@ couple manual configuration steps in the Jenkins UI.
 
     sudo service zuul restart
 
+### Running jobs on Jenkins Master
+
+Currently it seems that running jobs on Jenkins Master directly no longer works. It seems to be a regression
+with newer versions of Jenkins. So skip that and go straight to:
+
+
 ### Setting up Nodepool Jenkins Slaves
 
 1. Re-run the install_master.sh script for your changes to take effect.
 
-2. TODO(Ramy) Make sure the jenkins key is setup in the 'cloud' provider
-        with name "jenkins". Also, make it configurable.
+2. Make sure the jenkins key is setup in the 'cloud' provider
+   with name "jenkins". TODO: make it configurable.
 
-3. Start nodepool:
+3. Manually create your first image. This is helpful to debug errors. On subsequent
+   debug runs, consider enabling DIB_OFFLINE=true mode to save time. Remember to unset DIB_OFFLINE when creating the real image.
+
+   See here for more information.
+   [project-config DIB tips] (https://github.com/openstack-infra/project-config/tree/master/nodepool/elements)
+
    ```
+   sudo su - nodepool
+   #optional export DIB_OFFLINE=true
+   nodepool image-build <image-name>
+   ```
+
+4. Start nodepool:
+   ```
+   sudo service nodepool start
+   # Or manually (in a screen session):
    sudo su - nodepool
    source /etc/default/nodepool
    nodepoold -d $DAEMON_ARGS
    ```
-    TODO(Ramy) why does sudo service nodepool not work?
-
-### Setting up Static Jenkins Slaves
-
-On each machine you will use as a Jenkins slave, run:
-
-```
-wget https://raw.github.com/jaypipes/os-ext-testing/master/puppet/install_slave.sh
-bash install_slave.sh
-```
-
-The script will install Puppet, install a Jenkins slave, and install the Jenkins master's
-public SSH key in the `authorized_keys` of the Jenkins slave.
-
-Once the script completes successfully, you need to add the slave node to
-Jenkins master. To do so manually, follow these steps:
-
-1. Go to the Jenkins web UI. By default, this will be `http://$IP_OF_MASTER:8080`
-
-2. Click the `Credentials` link on the left
-
-3. Click the `Global credentials` link
-
-4. Click the `Add credentials` link on the left
-
-5. Select `SSH username with private key` from the dropdown labeled "Kind"
-
-6. Enter "jenkins" in the `Username` textbox
-
-7. Select the "From a file on Jenkins master" radio button and enter `/var/lib/jenkins/.ssh/id_rsa` in the File textbox
-
-8. Click the `OK` button
-
-9. Click the "Jenkins" link in the upper left to go back to home page
-
-10. Click the `Manage Jenkins` link on the left
-
-11. Click the `Manage Nodes` link
-
-12. Click the "New Node" link on the left
-
-13. Enter `devstack_slave1` in the `Node name` textbox
-
-14. Select the `Dumb Slave` radio button
-
-15. Click the `OK` button
-
-16. Enter `2` in the `Executors` textbox
-
-17. Enter `/home/jenkins/workspaces` in the `Remote root directory` textbox
-
-18. Enter `devstack_slave` in the `Labels` textbox
-
-19. Enter the IP Address of your slave host or VM in the `Host` textbox
-
-20. Select `jenkins` from the `Credentials` dropdown
-
-21. Click the `Save` button
-
-22. Click the `Log` link on the left. The log should show the master connecting
-    to the slave, and at the end of the log should be: "Slave successfully connected and online"
 
 ### Setting up Log Server
 
-The Log server is a simple VM with an Apache web server installed that provides http access to all the log files uploaded by the jenkins jobs. It is a separate script because the jenkins-zuul-nodepool 'master' server may/can not be publicly accessible for security reasons. In addition, separating out the log server as its own server relaxes the disk space requirements needed by the jenkins master. 
+The Log server is a simple VM with an Apache web server installed that provides http access to all the log files uploaded by the jenkins jobs. It is a separate script because the jenkins-zuul-nodepool 'master' server may/can not be publicly accessible for security reasons. In addition, separating out the log server as its own server relaxes the disk space requirements needed by the jenkins master.
+
+Installing the Log Server on the same VM as Jenkins/Nodepool/Zuul is not supported.
 
 It's configuration uses the puppet-openstackci scripts, which provide the friendly log filtering features, hightlighting, the line references, etc.
 
@@ -254,4 +315,12 @@ bash install_log_server.sh
 ```
 
 When completed, the jenkins user will be able to upload files to /srv/static/logs, which Apache will serve via http.
+This is accomplished by adding publishers to your jenkins job.
+
+For example:
+
+[console-log] (https://github.com/rasselin/os-ext-testing/blob/master/puppet/modules/os_ext_testing/templates/jenkins_job_builder/config/macros.yaml.erb#L117)
+
+[publisher used] (https://github.com/rasselin/os-ext-testing-data/blob/master/etc/jenkins_jobs/config/dsvm-cinder-driver.yaml.sample#L73)
+
 
